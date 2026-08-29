@@ -9,31 +9,28 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/Ciggzy1312/hookd/internal/server"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
+	max := flag.Int("max", 500, "max stored requests per inbox")
 	flag.Parse()
 
 	log := slog.Default()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("ok\n"))
+	srv := server.New(server.Config{
+		Addr: *addr,
+		Max:  *max,
+		Log:  log,
 	})
-
-	srv := &http.Server{
-		Addr:    *addr,
-		Handler: mux,
-	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", "url", "http://"+*addr+"/")
+		log.Info("listening", "url", srv.BaseURL(), "inbox", srv.InboxURL())
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 			return

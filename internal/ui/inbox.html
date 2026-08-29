@@ -1,0 +1,191 @@
+{{define "inbox"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hookd · {{.ID}}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap" id="app" data-inbox="{{.ID}}" data-url="{{.URL}}">
+  <header>
+    <div>
+      <h1>hookd</h1>
+      <div class="meta">POST <code id="inbox-url">{{.URL}}</code></div>
+    </div>
+    <div class="actions">
+      <button type="button" id="copy-url">Copy URL</button>
+      <button type="button" id="refresh">Refresh</button>
+      <a href="/">Home</a>
+    </div>
+  </header>
+  <div class="layout">
+    <section class="panel">
+      <h2>Requests</h2>
+      <div class="list" id="list"><p class="empty">Loading…</p></div>
+    </section>
+    <section class="panel">
+      <h2>Selected</h2>
+      <div class="detail" id="detail"><p class="detail-empty">Select a request</p></div>
+    </section>
+  </div>
+</div>
+<script>
+(function () {
+  var app = document.getElementById("app");
+  var inbox = app.getAttribute("data-inbox");
+  var inboxURL = app.getAttribute("data-url");
+  var listEl = document.getElementById("list");
+  var detailEl = document.getElementById("detail");
+  var items = [];
+  var selected = "";
+  var tab = "headers";
+
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function bodyBytes(rec) {
+    if (rec.body_base64) {
+      var bin = atob(rec.body_base64);
+      var out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    return new TextEncoder().encode(rec.body || "");
+  }
+
+  function toHex(bytes) {
+    if (!bytes.length) return "(empty)";
+    var lines = [];
+    for (var i = 0; i < bytes.length; i += 16) {
+      var hex = [];
+      var ascii = [];
+      for (var j = 0; j < 16 && i + j < bytes.length; j++) {
+        var b = bytes[i + j];
+        hex.push(b.toString(16).padStart(2, "0"));
+        ascii.push(b >= 32 && b < 127 ? String.fromCharCode(b) : ".");
+      }
+      lines.push(i.toString(16).padStart(8, "0") + "  " + hex.join(" ").padEnd(47, " ") + "  " + ascii.join(""));
+    }
+    return lines.join("\n");
+  }
+
+  function pretty(rec) {
+    if (rec.body_base64) return "(binary)";
+    if (!rec.body) return "(empty)";
+    try { return JSON.stringify(JSON.parse(rec.body), null, 2); }
+    catch (e) { return "(not JSON)"; }
+  }
+
+  function raw(rec) {
+    if (rec.body_base64) return rec.body_base64;
+    return rec.body || "(empty)";
+  }
+
+  function headers(rec) {
+    var keys = Object.keys(rec.headers || {}).sort();
+    if (!keys.length) return "(none)";
+    return keys.map(function (k) {
+      return k + ": " + rec.headers[k].join(", ");
+    }).join("\n");
+  }
+
+  function find(id) {
+    for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i];
+    return null;
+  }
+
+  function renderList() {
+    if (!items.length) {
+      listEl.innerHTML = '<p class="empty">No requests yet. POST to this inbox URL.</p>';
+      return;
+    }
+    var html = "";
+    for (var i = items.length - 1; i >= 0; i--) {
+      var r = items[i];
+      var q = r.query ? "?" + r.query : "";
+      var cls = "row" + (r.id === selected ? " selected" : "");
+      html += '<button type="button" class="' + cls + '" data-id="' + esc(r.id) + '">';
+      html += '<span class="m ' + esc(r.method) + '">' + esc(r.method) + "</span>";
+      html += esc(r.path) + esc(q);
+      html += '<div class="sub">' + esc(r.received_at || "") + (r.body_trunc ? ' · truncated' : "") + "</div>";
+      html += "</button>";
+    }
+    listEl.innerHTML = html;
+  }
+
+  function pane(rec) {
+    if (tab === "headers") return headers(rec);
+    if (tab === "json") return pretty(rec);
+    if (tab === "hex") return toHex(bodyBytes(rec));
+    return raw(rec);
+  }
+
+  function renderDetail() {
+    var rec = find(selected);
+    if (!rec) {
+      detailEl.innerHTML = '<p class="detail-empty">Select a request</p>';
+      return;
+    }
+    var q = rec.query ? "?" + rec.query : "";
+    var html = '<div class="summary">';
+    html += "<strong>" + esc(rec.method) + " " + esc(rec.path) + esc(q) + "</strong>";
+    html += '<div class="sub">' + esc(rec.remote_addr || "") + " · " + esc(rec.duration || "");
+    if (rec.body_trunc) html += ' <span class="trunc">body truncated</span>';
+    html += "</div></div>";
+    html += '<div class="tabs">';
+    ["headers", "json", "raw", "hex"].forEach(function (name) {
+      html += '<button type="button" class="tab' + (tab === name ? " active" : "") + '" data-tab="' + name + '">' + name + "</button>";
+    });
+    html += "</div><pre>" + esc(pane(rec)) + "</pre>";
+    detailEl.innerHTML = html;
+  }
+
+  function select(id) {
+    selected = id;
+    if (id) location.hash = id;
+    renderList();
+    renderDetail();
+  }
+
+  function load() {
+    return fetch("/i/" + inbox + "/requests").then(function (res) {
+      if (!res.ok) throw new Error("list failed");
+      return res.json();
+    }).then(function (data) {
+      items = data.requests || [];
+      var want = location.hash.replace(/^#/, "");
+      if (want && find(want)) selected = want;
+      else if (items.length) selected = items[items.length - 1].id;
+      renderList();
+      renderDetail();
+    }).catch(function () {
+      listEl.innerHTML = '<p class="empty">Could not load requests.</p>';
+    });
+  }
+
+  listEl.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-id]");
+    if (btn) select(btn.getAttribute("data-id"));
+  });
+  detailEl.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-tab]");
+    if (btn) {
+      tab = btn.getAttribute("data-tab");
+      renderDetail();
+    }
+  });
+  document.getElementById("refresh").addEventListener("click", load);
+  document.getElementById("copy-url").addEventListener("click", function () {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(inboxURL);
+    }
+  });
+  load();
+})();
+</script>
+</body>
+</html>
+{{end}}

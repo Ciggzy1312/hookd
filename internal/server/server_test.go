@@ -204,6 +204,25 @@ func TestInboxPageAndLanding(t *testing.T) {
 	if !strings.Contains(string(body), srv.InboxID()) {
 		t.Fatalf("landing missing inbox id: %s", body)
 	}
+	if !strings.Contains(string(body), `/static/style.css`) {
+		t.Fatal("landing missing stylesheet link")
+	}
+
+	css, err := http.Get(ts.URL + "/static/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cssBody, _ := io.ReadAll(css.Body)
+	css.Body.Close()
+	if css.StatusCode != http.StatusOK {
+		t.Fatalf("css status = %d", css.StatusCode)
+	}
+	if ct := css.Header.Get("Content-Type"); !strings.Contains(ct, "text/css") {
+		t.Fatalf("css content-type = %q", ct)
+	}
+	if !strings.Contains(string(cssBody), ":root") {
+		t.Fatalf("css body: %s", cssBody)
+	}
 
 	page, err := http.Get(ts.URL + "/i/" + srv.InboxID())
 	if err != nil {
@@ -217,14 +236,26 @@ func TestInboxPageAndLanding(t *testing.T) {
 	if !strings.Contains(string(pageBody), srv.InboxID()) {
 		t.Fatalf("inbox page missing id: %s", pageBody)
 	}
+	for _, want := range []string{`data-inbox=`, `id="list"`, `data-tab`, "headers", "json", "raw", "hex"} {
+		if !strings.Contains(string(pageBody), want) {
+			t.Fatalf("inbox page missing %q", want)
+		}
+	}
 
 	missing, err := http.Get(ts.URL + "/i/not-an-inbox")
 	if err != nil {
 		t.Fatal(err)
 	}
+	missBody, _ := io.ReadAll(missing.Body)
 	missing.Body.Close()
 	if missing.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing inbox status = %d", missing.StatusCode)
+	}
+	if ct := missing.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("404 content-type = %q", ct)
+	}
+	if !strings.Contains(string(missBody), "not found") {
+		t.Fatalf("404 page: %s", missBody)
 	}
 }
 

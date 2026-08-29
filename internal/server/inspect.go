@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/base64"
 	json "encoding/json/v2"
-	"html/template"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -33,12 +32,17 @@ type listResponse struct {
 	Requests []recordJSON `json:"requests"`
 }
 
+func (s *Server) handleCSS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	_, _ = w.Write(ui.StyleCSS())
+}
+
 func (s *Server) handleLanding(w http.ResponseWriter, r *http.Request) {
 	data := ui.LandingData{
 		InboxID:  s.inboxID,
 		InboxURL: "http://" + r.Host + "/i/" + s.inboxID,
 	}
-	s.render(w, http.StatusOK, ui.Landing, data)
+	s.render(w, http.StatusOK, "landing", data)
 }
 
 func (s *Server) handleNewInbox(w http.ResponseWriter, r *http.Request) {
@@ -49,10 +53,13 @@ func (s *Server) handleNewInbox(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInboxPage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !s.store.Has(id) {
-		http.NotFound(w, r)
+		s.render(w, http.StatusNotFound, "notfound", ui.NotFoundData{ID: id})
 		return
 	}
-	s.render(w, http.StatusOK, ui.Inbox, ui.InboxData{ID: id})
+	s.render(w, http.StatusOK, "inbox", ui.InboxData{
+		ID:  id,
+		URL: "http://" + r.Host + "/i/" + id,
+	})
 }
 
 func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
@@ -108,10 +115,10 @@ func writeJSON(w http.ResponseWriter, v any) {
 	}
 }
 
-func (s *Server) render(w http.ResponseWriter, status int, tmpl *template.Template, data any) {
+func (s *Server) render(w http.ResponseWriter, status int, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	if err := tmpl.Execute(w, data); err != nil {
+	if err := ui.Execute(w, name, data); err != nil {
 		s.log.Error("template", "err", err)
 	}
 }

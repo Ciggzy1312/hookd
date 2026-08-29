@@ -1,0 +1,21 @@
+{{define "notfound"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>inbox not found</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>hookd</h1>
+    <a href="/">Home</a>
+  </header>
+  <p>Inbox not found{{if .ID}}: <code>{{.ID}}</code>{{end}}</p>
+  <form method="post" action="/inboxes"><button type="submit">New inbox</button></form>
+</div>
+</body>
+</html>
+{{end}}

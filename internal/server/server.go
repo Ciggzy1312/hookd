@@ -52,6 +52,7 @@ func New(cfg Config) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleLanding)
+	mux.HandleFunc("GET /static/style.css", s.handleCSS)
 	mux.HandleFunc("POST /inboxes", s.handleNewInbox)
 	mux.HandleFunc("GET /i/{id}", s.handleInboxPage)
 	mux.HandleFunc("GET /i/{id}/requests", s.handleListRequests)

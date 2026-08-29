@@ -1,0 +1,23 @@
+{{define "landing"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hookd</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>hookd</h1>
+    <form method="post" action="/inboxes"><button type="submit">New inbox</button></form>
+  </header>
+  <p>Local webhook inbox. Paste this URL into Stripe, GitHub, or curl:</p>
+  <p><code>{{.InboxURL}}</code></p>
+  <p><a href="/i/{{.InboxID}}">Open inspector</a>
+     · <a href="/i/{{.InboxID}}/requests">JSON</a></p>
+</div>
+</body>
+</html>
+{{end}}

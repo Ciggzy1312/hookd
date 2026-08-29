@@ -51,7 +51,11 @@ func New(cfg Config) *Server {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.handleRoot)
+	mux.HandleFunc("GET /{$}", s.handleLanding)
+	mux.HandleFunc("POST /inboxes", s.handleNewInbox)
+	mux.HandleFunc("GET /i/{id}", s.handleInboxPage)
+	mux.HandleFunc("GET /i/{id}/requests", s.handleListRequests)
+	mux.HandleFunc("GET /i/{id}/requests/{rid}", s.handleGetRequest)
 	mux.HandleFunc("/i/{id}", s.handleCapture)
 
 	s.http = &http.Server{
@@ -81,11 +85,6 @@ func (s *Server) ListenAndServe() error {
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
-}
-
-func (s *Server) handleRoot(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("ok\n"))
 }
 
 func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {

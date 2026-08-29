@@ -1,0 +1,2 @@
+github.com/Ciggzy1312/hookd
+go version go1.27.0 darwin/arm64

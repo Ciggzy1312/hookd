@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	json "encoding/json/v2"
@@ -15,18 +16,24 @@ import (
 const maxBody = 1 << 20 // 1 MiB
 
 type Config struct {
-	Addr  string
-	Max   int
-	Store *store.Store
-	Log   *slog.Logger
+	Addr      string
+	Max       int
+	Store     *store.Store
+	Log       *slog.Logger
+	ReplayURL string
+	Forward   string
+	Client    *http.Client
 }
 
 type Server struct {
-	http    *http.Server
-	store   *store.Store
-	hub     *Hub
-	inboxID string
-	log     *slog.Logger
+	http      *http.Server
+	store     *store.Store
+	hub       *Hub
+	inboxID   string
+	log       *slog.Logger
+	replayURL string
+	forward   *url.URL
+	client    *http.Client
 }
 
 type captureResponse struct {
@@ -45,11 +52,22 @@ func New(cfg Config) *Server {
 	}
 	inboxID := st.Create()
 
+	client := cfg.Client
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	fwd := parseForward(cfg.Forward)
+	if cfg.Forward != "" && fwd == nil {
+		log.Error("invalid -forward URL", "url", cfg.Forward)
+	}
 	s := &Server{
-		store:   st,
-		hub:     newHub(),
-		inboxID: inboxID,
-		log:     log,
+		store:     st,
+		hub:       newHub(),
+		inboxID:   inboxID,
+		log:       log,
+		replayURL: cfg.ReplayURL,
+		forward:   fwd,
+		client:    client,
 	}
 	st.SetNotify(s.publish)
 
@@ -61,6 +79,7 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /i/{id}/events", s.handleEvents)
 	mux.HandleFunc("GET /i/{id}/requests", s.handleListRequests)
 	mux.HandleFunc("GET /i/{id}/requests/{rid}", s.handleGetRequest)
+	mux.HandleFunc("POST /i/{id}/replay", s.handleReplay)
 	mux.HandleFunc("/i/{id}", s.handleCapture)
 
 	s.http = &http.Server{
@@ -139,6 +158,11 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		http.NotFound(w, r)
+		return
+	}
+
+	if s.forward != nil {
+		s.forwardCapture(w, r, rec, body)
 		return
 	}
 

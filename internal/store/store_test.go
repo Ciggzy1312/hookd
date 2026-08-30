@@ -71,3 +71,33 @@ func TestConcurrentAppend(t *testing.T) {
 		t.Fatalf("len = %d, want %d", len(got), n)
 	}
 }
+
+func TestSetReplay(t *testing.T) {
+	s := New(8)
+	id := s.Create()
+	rec, err := s.Append(id, Record{Method: "POST", Body: []byte("x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.SetReplay(id, rec.ID, Upstream{Status: 201, Body: []byte("ok")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Replay == nil || got.Replay.Status != 201 {
+		t.Fatalf("replay = %+v", got.Replay)
+	}
+	listed, err := s.Get(id, rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed.Replay == nil || listed.Replay.Status != 201 {
+		t.Fatalf("stored replay = %+v", listed.Replay)
+	}
+	fwd, err := s.SetForward(id, rec.ID, Upstream{Status: 202})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fwd.Forward == nil || fwd.Forward.Status != 202 {
+		t.Fatalf("forward = %+v", fwd.Forward)
+	}
+}

@@ -24,6 +24,16 @@ type recordJSON struct {
 	RemoteAddr string              `json:"remote_addr"`
 	Duration   string              `json:"duration"`
 	ReceivedAt time.Time           `json:"received_at"`
+	Replay     *upstreamJSON       `json:"replay,omitempty"`
+	Forward    *upstreamJSON       `json:"forward,omitempty"`
+}
+
+type upstreamJSON struct {
+	Status     int    `json:"status"`
+	Body       string `json:"body,omitempty"`
+	BodyBase64 string `json:"body_base64,omitempty"`
+	BodyTrunc  bool   `json:"body_trunc,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type listResponse struct {
@@ -57,8 +67,9 @@ func (s *Server) handleInboxPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, http.StatusOK, "inbox", ui.InboxData{
-		ID:  id,
-		URL: "http://" + r.Host + "/i/" + id,
+		ID:        id,
+		URL:       "http://" + r.Host + "/i/" + id,
+		ReplayURL: s.replayURL,
 	})
 }
 
@@ -99,11 +110,26 @@ func toRecordJSON(rec store.Record) recordJSON {
 		RemoteAddr: rec.RemoteAddr,
 		Duration:   rec.Duration.String(),
 		ReceivedAt: rec.ReceivedAt,
+		Replay:     toUpstreamJSON(rec.Replay),
+		Forward:    toUpstreamJSON(rec.Forward),
 	}
 	if utf8.Valid(rec.Body) {
 		out.Body = string(rec.Body)
 	} else {
 		out.BodyBase64 = base64.StdEncoding.EncodeToString(rec.Body)
+	}
+	return out
+}
+
+func toUpstreamJSON(up *store.Upstream) *upstreamJSON {
+	if up == nil {
+		return nil
+	}
+	out := &upstreamJSON{Status: up.Status, BodyTrunc: up.BodyTrunc, Error: up.Error}
+	if utf8.Valid(up.Body) {
+		out.Body = string(up.Body)
+	} else if len(up.Body) > 0 {
+		out.BodyBase64 = base64.StdEncoding.EncodeToString(up.Body)
 	}
 	return out
 }

@@ -99,4 +99,14 @@ pre {
   padding: 0.75rem;
 }
 .trunc { color: var(--patch); }
-.actions { display: flex; gap: 0.4rem; }
+.actions { display: flex; gap: 0.4rem; align-items: center; }
+.replay { display: flex; gap: 0.4rem; margin: 0.75rem 0; }
+.replay input {
+  flex: 1;
+  font: inherit;
+  color: var(--text);
+  background: #0e1015;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+}

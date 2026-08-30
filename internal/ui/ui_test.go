@@ -15,7 +15,7 @@ func TestTemplatesExecute(t *testing.T) {
 	}
 
 	b.Reset()
-	if err := Execute(&b, "inbox", InboxData{ID: "abc", URL: "http://127.0.0.1:8080/i/abc"}); err != nil {
+	if err := Execute(&b, "inbox", InboxData{ID: "abc", URL: "http://127.0.0.1:8080/i/abc", ReplayURL: "http://127.0.0.1:9999/"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(b.String(), `data-inbox="abc"`) {

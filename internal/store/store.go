@@ -30,6 +30,7 @@ type Store struct {
 	mu      sync.Mutex
 	max     int
 	inboxes map[string]*inbox
+	notify  func(Record)
 }
 
 type inbox struct {
@@ -55,6 +56,12 @@ func (s *Store) Create() string {
 	return id
 }
 
+func (s *Store) SetNotify(fn func(Record)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notify = fn
+}
+
 func (s *Store) Has(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,14 +85,19 @@ func (s *Store) Append(inboxID string, rec Record) (Record, error) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	in, ok := s.inboxes[inboxID]
 	if !ok {
+		s.mu.Unlock()
 		return Record{}, ErrNotFound
 	}
 	in.records = append(in.records, rec)
 	if extra := len(in.records) - s.max; extra > 0 {
 		in.records = in.records[extra:]
+	}
+	notify := s.notify
+	s.mu.Unlock()
+	if notify != nil {
+		notify(rec)
 	}
 	return rec, nil
 }

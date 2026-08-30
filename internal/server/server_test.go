@@ -1,13 +1,16 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	json "encoding/json/v2"
 
@@ -236,7 +239,7 @@ func TestInboxPageAndLanding(t *testing.T) {
 	if !strings.Contains(string(pageBody), srv.InboxID()) {
 		t.Fatalf("inbox page missing id: %s", pageBody)
 	}
-	for _, want := range []string{`data-inbox=`, `id="list"`, `data-tab`, "headers", "json", "raw", "hex"} {
+	for _, want := range []string{`data-inbox=`, `id="list"`, `data-tab`, "EventSource", "headers", "json", "raw", "hex"} {
 		if !strings.Contains(string(pageBody), want) {
 			t.Fatalf("inbox page missing %q", want)
 		}
@@ -379,5 +382,131 @@ func TestCaptureConcurrent(t *testing.T) {
 	}
 	if len(got) != n {
 		t.Fatalf("len = %d, want %d", len(got), n)
+	}
+}
+
+func TestSSEReceivesCapture(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		srv := New(Config{Max: 8})
+		t.Cleanup(srv.Close)
+		ts := httptest.NewTestServer(t, srv.Handler())
+		client := ts.Client()
+		inbox := srv.InboxID()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+
+		got := make(chan recordJSON, 1)
+		go func() {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://hookd.test/i/"+inbox+"/events", nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("sse status = %d", resp.StatusCode)
+				return
+			}
+			sc := bufio.NewScanner(resp.Body)
+			for sc.Scan() {
+				line := sc.Text()
+				if rest, ok := strings.CutPrefix(line, "data: "); ok && rest != "" {
+					var rec recordJSON
+					if err := json.Unmarshal([]byte(rest), &rec); err != nil {
+						t.Error(err)
+						return
+					}
+					got <- rec
+					return
+				}
+			}
+			if err := sc.Err(); err != nil && ctx.Err() == nil {
+				t.Error(err)
+			}
+		}()
+
+		synctest.Sleep(0)
+
+		resp, err := client.Post("http://hookd.test/i/"+inbox, "application/json", strings.NewReader(`{"sse":true}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("capture status = %d", resp.StatusCode)
+		}
+
+		synctest.Sleep(0)
+
+		select {
+		case rec := <-got:
+			if rec.Body != `{"sse":true}` || rec.Method != http.MethodPost {
+				t.Fatalf("event = %+v", rec)
+			}
+		default:
+			t.Fatal("no SSE event")
+		}
+		cancel()
+		synctest.Sleep(0)
+	})
+}
+
+func TestCSRF(t *testing.T) {
+	srv := New(Config{Max: 8})
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	cross := func(method, url string) *http.Request {
+		req, err := http.NewRequest(method, url, strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Origin", "https://evil.example")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+
+	blocked, err := http.DefaultClient.Do(cross(http.MethodPost, ts.URL+"/inboxes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked.Body.Close()
+	if blocked.StatusCode != http.StatusForbidden {
+		t.Fatalf("create inbox status = %d, want 403", blocked.StatusCode)
+	}
+
+	allowed, err := http.DefaultClient.Do(cross(http.MethodPost, ts.URL+"/i/"+srv.InboxID()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, allowed.Body)
+	allowed.Body.Close()
+	if allowed.StatusCode != http.StatusOK {
+		t.Fatalf("capture status = %d, want 200", allowed.StatusCode)
+	}
+}
+
+func TestEventsUnknownInbox(t *testing.T) {
+	srv := New(Config{Max: 8})
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Get(ts.URL + "/i/not-an-inbox/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d", resp.StatusCode)
 	}
 }

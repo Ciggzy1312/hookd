@@ -15,6 +15,7 @@
       <div class="meta">POST <code id="inbox-url">{{.URL}}</code></div>
     </div>
     <div class="actions">
+      <span id="live" class="sub">connecting</span>
       <button type="button" id="copy-url">Copy URL</button>
       <button type="button" id="refresh">Refresh</button>
       <a href="/">Home</a>
@@ -183,6 +184,20 @@
       navigator.clipboard.writeText(inboxURL);
     }
   });
+  var live = document.getElementById("live");
+  var es = new EventSource("/i/" + inbox + "/events");
+  es.onopen = function () { live.textContent = "live"; };
+  es.onerror = function () { live.textContent = "reconnecting"; };
+  es.onmessage = function (ev) {
+    var rec;
+    try { rec = JSON.parse(ev.data); } catch (e) { return; }
+    if (!rec || !rec.id || find(rec.id)) return;
+    var empty = items.length === 0;
+    items.push(rec);
+    if (empty) selected = rec.id;
+    renderList();
+    renderDetail();
+  };
   load();
 })();
 </script>

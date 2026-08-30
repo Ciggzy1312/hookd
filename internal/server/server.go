@@ -24,6 +24,7 @@ type Config struct {
 type Server struct {
 	http    *http.Server
 	store   *store.Store
+	hub     *Hub
 	inboxID string
 	log     *slog.Logger
 }
@@ -46,22 +47,25 @@ func New(cfg Config) *Server {
 
 	s := &Server{
 		store:   st,
+		hub:     newHub(),
 		inboxID: inboxID,
 		log:     log,
 	}
+	st.SetNotify(s.publish)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleLanding)
 	mux.HandleFunc("GET /static/style.css", s.handleCSS)
 	mux.HandleFunc("POST /inboxes", s.handleNewInbox)
 	mux.HandleFunc("GET /i/{id}", s.handleInboxPage)
+	mux.HandleFunc("GET /i/{id}/events", s.handleEvents)
 	mux.HandleFunc("GET /i/{id}/requests", s.handleListRequests)
 	mux.HandleFunc("GET /i/{id}/requests/{rid}", s.handleGetRequest)
 	mux.HandleFunc("/i/{id}", s.handleCapture)
 
 	s.http = &http.Server{
 		Addr:    cfg.Addr,
-		Handler: mux,
+		Handler: wrapHandler(log, mux),
 	}
 	return s
 }
@@ -85,7 +89,22 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.http.Shutdown(ctx)
+	err := s.http.Shutdown(ctx)
+	s.Close()
+	return err
+}
+
+func (s *Server) Close() {
+	s.hub.Stop()
+}
+
+func (s *Server) publish(rec store.Record) {
+	b, err := json.Marshal(toRecordJSON(rec))
+	if err != nil {
+		s.log.Error("sse encode", "err", err)
+		return
+	}
+	s.hub.Publish(rec.InboxID, b)
 }
 
 func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {

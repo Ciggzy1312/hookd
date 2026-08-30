@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Ciggzy1312/hookd/internal/curlfmt"
 	"github.com/Ciggzy1312/hookd/internal/store"
 	"github.com/Ciggzy1312/hookd/internal/ui"
 )
@@ -26,6 +27,7 @@ type recordJSON struct {
 	ReceivedAt time.Time           `json:"received_at"`
 	Replay     *upstreamJSON       `json:"replay,omitempty"`
 	Forward    *upstreamJSON       `json:"forward,omitempty"`
+	Curl       string              `json:"curl,omitempty"`
 }
 
 type upstreamJSON struct {
@@ -113,6 +115,11 @@ func toRecordJSON(rec store.Record) recordJSON {
 		Replay:     toUpstreamJSON(rec.Replay),
 		Forward:    toUpstreamJSON(rec.Forward),
 	}
+	rawURL := rec.Path
+	if rec.Query != "" {
+		rawURL += "?" + rec.Query
+	}
+	out.Curl = curlfmt.Command(rec.Method, rawURL, rec.Headers, rec.Body)
 	if utf8.Valid(rec.Body) {
 		out.Body = string(rec.Body)
 	} else {

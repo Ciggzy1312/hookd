@@ -143,6 +143,7 @@
     html += '<div class="replay">';
     html += '<input id="replay-target" type="url" placeholder="http://127.0.0.1:9999/" value="' + esc(replayTarget) + '">';
     html += '<button type="button" id="replay-btn">Replay</button>';
+    html += '<button type="button" id="copy-curl">Copy curl</button>';
     html += "</div>";
     if (rec.forward) {
       html += '<div class="sub">forward ';
@@ -196,6 +197,13 @@
     if (tabBtn) {
       tab = tabBtn.getAttribute("data-tab");
       renderDetail();
+      return;
+    }
+    if (e.target.id === "copy-curl") {
+      var rec = find(selected);
+      if (rec && rec.curl && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(rec.curl.replace(/^(curl -X \S+ )'/, "$1'" + location.origin));
+      }
       return;
     }
     if (e.target.id === "replay-btn") {

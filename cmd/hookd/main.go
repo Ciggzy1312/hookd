@@ -7,17 +7,28 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/Ciggzy1312/hookd/internal/envfile"
 	"github.com/Ciggzy1312/hookd/internal/server"
+	"github.com/Ciggzy1312/hookd/internal/store"
 )
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
-	max := flag.Int("max", 500, "max stored requests per inbox")
-	replayURL := flag.String("replay-url", "", "default replay target URL")
-	forward := flag.String("forward", "", "reverse-proxy captured requests to this URL")
+	env := envfile.Load(".env")
+	maxDef := store.DefaultMax
+	if v := env["MAX"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			maxDef = n
+		}
+	}
+
+	addr := flag.String("addr", envDefault(env, "ADDR", "127.0.0.1:8080"), "listen address")
+	max := flag.Int("max", maxDef, "max stored requests per inbox")
+	replayURL := flag.String("replay-url", envDefault(env, "REPLAY_URL", ""), "default replay target URL")
+	forward := flag.String("forward", envDefault(env, "FORWARD", ""), "reverse-proxy captured requests to this URL")
 	flag.Parse()
 
 	log := slog.Default()
@@ -28,6 +39,8 @@ func main() {
 		ReplayURL: *replayURL,
 		Forward:   *forward,
 	})
+
+	writeBanner(os.Stdout, srv.BaseURL(), srv.InboxURL(), *forward)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -57,4 +70,13 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func envDefault(env map[string]string, key, fallback string) string {
+	if env != nil {
+		if v := env[key]; v != "" {
+			return v
+		}
+	}
+	return fallback
 }

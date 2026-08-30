@@ -172,6 +172,9 @@ func TestInspectAfterCapture(t *testing.T) {
 	if list.Requests[0].ID != cap.ID || list.Requests[0].Body != `{"hi":1}` {
 		t.Fatalf("record = %+v", list.Requests[0])
 	}
+	if list.Requests[0].Curl == "" || !strings.Contains(list.Requests[0].Curl, "curl -X") {
+		t.Fatalf("missing curl: %+v", list.Requests[0])
+	}
 
 	one, err := http.Get(ts.URL + "/i/" + inbox + "/requests/" + cap.ID)
 	if err != nil {
@@ -239,7 +242,7 @@ func TestInboxPageAndLanding(t *testing.T) {
 	if !strings.Contains(string(pageBody), srv.InboxID()) {
 		t.Fatalf("inbox page missing id: %s", pageBody)
 	}
-	for _, want := range []string{`data-inbox=`, `id="list"`, `data-tab`, "EventSource", "replay-btn", "headers", "json", "raw", "hex"} {
+	for _, want := range []string{`data-inbox=`, `id="list"`, `data-tab`, "EventSource", "replay-btn", "copy-curl", "headers", "json", "raw", "hex"} {
 		if !strings.Contains(string(pageBody), want) {
 			t.Fatalf("inbox page missing %q", want)
 		}

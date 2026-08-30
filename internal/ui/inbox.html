@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="wrap" id="app" data-inbox="{{.ID}}" data-url="{{.URL}}">
+<div class="wrap" id="app" data-inbox="{{.ID}}" data-url="{{.URL}}" data-replay="{{.ReplayURL}}">
   <header>
     <div>
       <h1>hookd</h1>
@@ -42,6 +42,7 @@
   var items = [];
   var selected = "";
   var tab = "headers";
+  var replayTarget = app.getAttribute("data-replay") || "";
 
   function esc(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -111,7 +112,10 @@
       html += '<button type="button" class="' + cls + '" data-id="' + esc(r.id) + '">';
       html += '<span class="m ' + esc(r.method) + '">' + esc(r.method) + "</span>";
       html += esc(r.path) + esc(q);
-      html += '<div class="sub">' + esc(r.received_at || "") + (r.body_trunc ? ' · truncated' : "") + "</div>";
+      html += '<div class="sub">' + esc(r.received_at || "") + (r.body_trunc ? ' · truncated' : "");
+      if (r.replay && r.replay.status) html += " · replay " + r.replay.status;
+      if (r.forward && r.forward.status) html += " · forward " + r.forward.status;
+      html += "</div>";
       html += "</button>";
     }
     listEl.innerHTML = html;
@@ -136,6 +140,22 @@
     html += '<div class="sub">' + esc(rec.remote_addr || "") + " · " + esc(rec.duration || "");
     if (rec.body_trunc) html += ' <span class="trunc">body truncated</span>';
     html += "</div></div>";
+    html += '<div class="replay">';
+    html += '<input id="replay-target" type="url" placeholder="http://127.0.0.1:9999/" value="' + esc(replayTarget) + '">';
+    html += '<button type="button" id="replay-btn">Replay</button>';
+    html += "</div>";
+    if (rec.forward) {
+      html += '<div class="sub">forward ';
+      if (rec.forward.status) html += rec.forward.status + " ";
+      if (rec.forward.error) html += esc(rec.forward.error);
+      html += "</div>";
+    }
+    if (rec.replay) {
+      html += '<div class="sub">replay ';
+      if (rec.replay.status) html += rec.replay.status + " ";
+      if (rec.replay.error) html += esc(rec.replay.error);
+      html += "</div>";
+    }
     html += '<div class="tabs">';
     ["headers", "json", "raw", "hex"].forEach(function (name) {
       html += '<button type="button" class="tab' + (tab === name ? " active" : "") + '" data-tab="' + name + '">' + name + "</button>";
@@ -172,10 +192,30 @@
     if (btn) select(btn.getAttribute("data-id"));
   });
   detailEl.addEventListener("click", function (e) {
-    var btn = e.target.closest("[data-tab]");
-    if (btn) {
-      tab = btn.getAttribute("data-tab");
+    var tabBtn = e.target.closest("[data-tab]");
+    if (tabBtn) {
+      tab = tabBtn.getAttribute("data-tab");
       renderDetail();
+      return;
+    }
+    if (e.target.id === "replay-btn") {
+      var input = document.getElementById("replay-target");
+      if (input) replayTarget = input.value;
+      fetch("/i/" + inbox + "/replay", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({id: selected, target: replayTarget})
+      }).then(function (res) { return res.json().then(function (data) { return {ok: res.ok, data: data}; }); })
+        .then(function (out) {
+          if (!out.ok || !out.data.request) throw new Error("replay failed");
+          for (var i = 0; i < items.length; i++) {
+            if (items[i].id === out.data.request.id) { items[i] = out.data.request; break; }
+          }
+          renderList();
+          renderDetail();
+        }).catch(function () {
+          alert("Replay failed. Check the target URL.");
+        });
     }
   });
   document.getElementById("refresh").addEventListener("click", load);
@@ -191,7 +231,16 @@
   es.onmessage = function (ev) {
     var rec;
     try { rec = JSON.parse(ev.data); } catch (e) { return; }
-    if (!rec || !rec.id || find(rec.id)) return;
+    if (!rec || !rec.id) return;
+    var i;
+    for (i = 0; i < items.length; i++) {
+      if (items[i].id === rec.id) {
+        items[i] = rec;
+        renderList();
+        renderDetail();
+        return;
+      }
+    }
     var empty = items.length === 0;
     items.push(rec);
     if (empty) selected = rec.id;

@@ -239,7 +239,7 @@ func TestInboxPageAndLanding(t *testing.T) {
 	if !strings.Contains(string(pageBody), srv.InboxID()) {
 		t.Fatalf("inbox page missing id: %s", pageBody)
 	}
-	for _, want := range []string{`data-inbox=`, `id="list"`, `data-tab`, "EventSource", "headers", "json", "raw", "hex"} {
+	for _, want := range []string{`data-inbox=`, `id="list"`, `data-tab`, "EventSource", "replay-btn", "headers", "json", "raw", "hex"} {
 		if !strings.Contains(string(pageBody), want) {
 			t.Fatalf("inbox page missing %q", want)
 		}
@@ -508,5 +508,159 @@ func TestEventsUnknownInbox(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestReplayHitsUpstream(t *testing.T) {
+	var (
+		gotMethod string
+		gotPath   string
+		gotHook   string
+		gotBody   string
+	)
+	up := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotHook = r.Header.Get("X-Test-Hook")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("accepted"))
+	}))
+
+	st := store.New(8)
+	srv := New(Config{
+		Store:     st,
+		Max:       8,
+		ReplayURL: "http://upstream.test/hook",
+		Client:    up.Client(),
+	})
+	t.Cleanup(srv.Close)
+	ts := httptest.NewTestServer(t, srv.Handler())
+	client := ts.Client()
+	inbox := srv.InboxID()
+
+	req, err := http.NewRequest(http.MethodPut, "http://hookd.test/i/"+inbox+"?q=1", strings.NewReader(`{"hi":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-Hook", "stripe")
+	cap, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var captured captureResponse
+	if err := json.UnmarshalRead(cap.Body, &captured); err != nil {
+		t.Fatal(err)
+	}
+	cap.Body.Close()
+
+	replay, err := client.Post("http://hookd.test/i/"+inbox+"/replay", "application/json", strings.NewReader(`{"id":"`+captured.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replay.Body.Close()
+	if replay.StatusCode != http.StatusOK {
+		t.Fatalf("replay status = %d", replay.StatusCode)
+	}
+	var out replayResponse
+	if err := json.UnmarshalRead(replay.Body, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.OK || out.Request.Replay == nil || out.Request.Replay.Status != http.StatusCreated {
+		t.Fatalf("replay response = %+v", out)
+	}
+	if gotMethod != http.MethodPut || gotHook != "stripe" || gotBody != `{"hi":1}` || gotPath != "/hook" {
+		t.Fatalf("upstream method=%s hook=%s body=%q path=%s", gotMethod, gotHook, gotBody, gotPath)
+	}
+
+	stored, err := st.Get(inbox, captured.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Replay == nil || stored.Replay.Status != http.StatusCreated {
+		t.Fatalf("stored replay = %+v", stored.Replay)
+	}
+}
+
+func TestReplayRequiresTarget(t *testing.T) {
+	srv := New(Config{Max: 8})
+	t.Cleanup(srv.Close)
+	ts := httptest.NewTestServer(t, srv.Handler())
+	client := ts.Client()
+	inbox := srv.InboxID()
+
+	cap, err := client.Post("http://hookd.test/i/"+inbox, "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var captured captureResponse
+	if err := json.UnmarshalRead(cap.Body, &captured); err != nil {
+		t.Fatal(err)
+	}
+	cap.Body.Close()
+
+	resp, err := client.Post("http://hookd.test/i/"+inbox+"/replay", "application/json", strings.NewReader(`{"id":"`+captured.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestForwardRecordsUpstream(t *testing.T) {
+	var (
+		gotMethod string
+		gotPath   string
+		gotBody   string
+	)
+	up := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("hop-ok"))
+	}))
+
+	st := store.New(8)
+	srv := New(Config{
+		Store:   st,
+		Max:     8,
+		Forward: "http://upstream.test",
+		Client:  up.Client(),
+	})
+	t.Cleanup(srv.Close)
+	ts := httptest.NewTestServer(t, srv.Handler())
+	inbox := srv.InboxID()
+
+	resp, err := ts.Client().Post("http://hookd.test/i/"+inbox, "application/json", strings.NewReader(`{"fwd":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("client status = %d", resp.StatusCode)
+	}
+	if string(body) != "hop-ok" {
+		t.Fatalf("client body = %q", body)
+	}
+	if gotMethod != http.MethodPost || gotBody != `{"fwd":1}` || gotPath != "/i/"+inbox {
+		t.Fatalf("upstream method=%s path=%s body=%q", gotMethod, gotPath, gotBody)
+	}
+
+	recs, err := st.List(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 || recs[0].Forward == nil || recs[0].Forward.Status != http.StatusAccepted {
+		t.Fatalf("stored = %+v", recs)
+	}
+	if string(recs[0].Forward.Body) != "hop-ok" {
+		t.Fatalf("stored hop body = %q", recs[0].Forward.Body)
 	}
 }

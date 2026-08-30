@@ -12,6 +12,13 @@ const DefaultMax = 500
 
 var ErrNotFound = errors.New("inbox not found")
 
+type Upstream struct {
+	Status    int
+	Body      []byte
+	BodyTrunc bool
+	Error     string
+}
+
 type Record struct {
 	ID         string
 	InboxID    string
@@ -24,6 +31,8 @@ type Record struct {
 	RemoteAddr string
 	Duration   time.Duration
 	ReceivedAt time.Time
+	Replay     *Upstream
+	Forward    *Upstream
 }
 
 type Store struct {
@@ -126,5 +135,41 @@ func (s *Store) Get(inboxID, recID string) (Record, error) {
 			return in.records[i], nil
 		}
 	}
+	return Record{}, ErrNotFound
+}
+
+func (s *Store) SetReplay(inboxID, recID string, up Upstream) (Record, error) {
+	return s.setHop(inboxID, recID, up, func(rec *Record, hop *Upstream) { rec.Replay = hop })
+}
+
+func (s *Store) SetForward(inboxID, recID string, up Upstream) (Record, error) {
+	return s.setHop(inboxID, recID, up, func(rec *Record, hop *Upstream) { rec.Forward = hop })
+}
+
+func (s *Store) setHop(inboxID, recID string, up Upstream, apply func(*Record, *Upstream)) (Record, error) {
+	if up.Body != nil {
+		up.Body = append([]byte(nil), up.Body...)
+	}
+	s.mu.Lock()
+	in, ok := s.inboxes[inboxID]
+	if !ok {
+		s.mu.Unlock()
+		return Record{}, ErrNotFound
+	}
+	for i := range in.records {
+		if in.records[i].ID != recID {
+			continue
+		}
+		cp := up
+		apply(&in.records[i], &cp)
+		rec := in.records[i]
+		notify := s.notify
+		s.mu.Unlock()
+		if notify != nil {
+			notify(rec)
+		}
+		return rec, nil
+	}
+	s.mu.Unlock()
 	return Record{}, ErrNotFound
 }

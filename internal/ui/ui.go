@@ -22,8 +22,9 @@ type LandingData struct {
 }
 
 type InboxData struct {
-	ID  string
-	URL string
+	ID        string
+	URL       string
+	ReplayURL string
 }
 
 type NotFoundData struct {

@@ -16,13 +16,17 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
 	max := flag.Int("max", 500, "max stored requests per inbox")
+	replayURL := flag.String("replay-url", "", "default replay target URL")
+	forward := flag.String("forward", "", "reverse-proxy captured requests to this URL")
 	flag.Parse()
 
 	log := slog.Default()
 	srv := server.New(server.Config{
-		Addr: *addr,
-		Max:  *max,
-		Log:  log,
+		Addr:      *addr,
+		Max:       *max,
+		Log:       log,
+		ReplayURL: *replayURL,
+		Forward:   *forward,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -30,7 +34,7 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", "url", srv.BaseURL(), "inbox", srv.InboxURL())
+		log.Info("listening", "url", srv.BaseURL(), "inbox", srv.InboxURL(), "forward", *forward)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 			return

@@ -2,3 +2,5 @@
 /hookd-a
 /hookd-b
 *.jsonl
+.env
+

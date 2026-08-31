@@ -1,4 +1,4 @@
-.PHONY: build test deps-proof reproduce clean
+.PHONY: build test deps-proof reproduce clean demo-order demo-payment
 
 GO ?= go
 BIN := hookd
@@ -23,6 +23,12 @@ reproduce:
 		shasum -a 256 hookd-a hookd-b; \
 	fi
 	cmp hookd-a hookd-b
+
+demo-order:
+	node demo/order/server.mjs
+
+demo-payment:
+	$(GO) run ./demo/payment
 
 clean:
 	rm -f $(BIN) hookd-a hookd-b

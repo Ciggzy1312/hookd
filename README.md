@@ -86,6 +86,55 @@ If `target` is omitted, `-replay-url` is used.
 
 An optional `.env` (`KEY=VALUE`, `#` comments) sets those defaults. Flags override. `NO_COLOR` turns off the ANSI banner; logs stay `log/slog`. SIGINT and SIGTERM call `http.Server.Shutdown`.
 
+## Demo
+
+`demo/order` (Node) and `demo/payment` (Go) are two tiny APIs so you can inspect a real webhook hop — not only a curl against the inbox.
+
+```mermaid
+flowchart LR
+  you[curl_POST_orders]
+  order[Order_Node]
+  pay[Payment_Go]
+  hookd[hookd_inbox]
+  you --> order
+  order -->|"order.paid"| pay
+  pay -->|"payment.succeeded"| hookd
+  hookd -->|"inspect"| ui[Browser]
+  hookd -->|"forward /i/id"| order
+  hookd -->|"replay /webhooks/payment"| order
+```
+
+Checkout hits the order service. Order notifies payment. Payment POSTs `payment.succeeded` at hookd. The inspector shows that request live; `--forward` proxies it to order (path is preserved, so order also listens on `/i/{id}`); Replay sends the same body at `/webhooks/payment`.
+
+Needs **Node** as well as Go 1.27. Copy `.env.example` to `.env` if you do not have one, and set:
+
+```
+FORWARD=http://127.0.0.1:3001
+REPLAY_URL=http://127.0.0.1:3001/webhooks/payment
+```
+
+Leave `demo/payment` `WEBHOOK_URL` empty. Payment then fetches the current inbox from `HOOKD_URL` (`http://127.0.0.1:8080`). If `WEBHOOK_URL` points at the order service instead, the webhook never hits hookd and the inspector stays empty.
+
+Three terminals, **hookd first** (so payment can read the inbox URL):
+
+```bash
+make build && ./hookd
+make demo-order
+make demo-payment
+```
+
+Payment should print `webhook http://127.0.0.1:8080/i/<id>`. Open that URL in a browser — `GET /i/{id}` is the inspector, not a capture. Then:
+
+```bash
+curl -X POST http://127.0.0.1:3001/orders \
+  -H 'Content-Type: application/json' \
+  -d '{"item":"hoodie","amount":4200}'
+```
+
+Create returns `pending`. With forward on, `curl http://127.0.0.1:3001/orders` shows `paid` a moment later. The UI has the `payment.succeeded` record, the forward hop, and a Replay button.
+
+Restart payment after you restart hookd — the inbox id is new each process.
+
 ## Design
 
 `cmd/hookd` is flags, signals, and the listen loop. HTTP lives in `internal/server`. Memory and the ring live in `internal/store`. Pages are `html/template` in `internal/ui`. Copy-as-curl and `.env` parse are small packages next to them.
